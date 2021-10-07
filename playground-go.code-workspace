@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"name": "playground",
+			"path": "."
+		},
+		{
+			"name": "alpha",
+			"path": "alpha"
+		},
+		{
+			"name": "zulu",
+			"path": "zulu"
+		}
+	],
+	"settings": {}
+}
