@@ -1,6 +1,6 @@
 # hystrix-go-example
 
-this is an example of [hystrix-go](https://github.com/afex/hystrix-go) usage in web dev using gin
+this is an example of [hystrix-go](https://github.com/afex/hystrix-go) usage in web dev
 
 ## Explanation
 
