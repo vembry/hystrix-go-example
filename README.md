@@ -24,11 +24,11 @@ this example contains 2 service:
 1. you need to run both separately
 2. run alpha from root folder
  ```bash
- cd alpha; go run main.go
+ go run alpha/main.go
  ```
 3. run zulu from root folder
  ```bash
- cd zulu; go run main.go
+ go run zulu/main.go
  ```
 
 #

@@ -18,7 +18,7 @@ func main() {
 
 	// hystrix configs
 	hystrix.ConfigureCommand("something", hystrix.CommandConfig{
-		SleepWindow:            10000,
+		SleepWindow:            10000, // in ms
 		RequestVolumeThreshold: 5,
 	})
 
