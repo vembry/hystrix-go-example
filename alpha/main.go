@@ -87,7 +87,7 @@ func initHandler(r *gin.Engine) {
 		c.JSON(200, response)
 	})
 
-	// handler in-house httpclient lib
+	// handler with in-house httpclient lib
 	r.GET("/ping-c", func(c *gin.Context) {
 
 		var response map[string]interface{}
