@@ -1,7 +1,6 @@
 package httpclient
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,8 +12,8 @@ import (
 
 //httpclient
 type Client struct {
-	client *http.Client
-	config Config
+	client *http.Client // http client, using native golang net's http
+	config Config       // configs
 }
 
 //Circuit Breaker config
@@ -37,10 +36,9 @@ type Config struct {
 	Host                  string               // external host
 	Timeout               time.Duration        // http request timeout
 	RetryCount            int                  // failing http request retry
+	OnPreRetryCallback    func(*http.Request)  // callback called on every pre-retry
 	IsUsingCircuitBreaker bool                 // flag to use circuit breaker, true = on, false = off
 	CbConfig              CircuitBreakerConfig // custom config for circuit breaker
-
-	//Logger Logger // logging stuff
 }
 
 // default values for Config
@@ -59,6 +57,11 @@ func NewHttpClient(config Config) HttpClient {
 		config.Timeout = defautTimeout
 	}
 
+	// set default value if default config not defined
+	if config.OnPreRetryCallback == nil {
+		config.OnPreRetryCallback = func(r *http.Request) {}
+	}
+
 	// configure circuit breaker
 	if config.IsUsingCircuitBreaker {
 		// set default value if not defined
@@ -73,7 +76,9 @@ func NewHttpClient(config Config) HttpClient {
 
 		// set default value if not defined
 		if config.CbConfig.Fallback == nil {
-			config.CbConfig.Fallback = func(error) {}
+			config.CbConfig.Fallback = func(error) {
+
+			}
 		}
 
 		// set default value if not defined
@@ -95,52 +100,26 @@ func NewHttpClient(config Config) HttpClient {
 		config: config,
 		client: &http.Client{Timeout: config.Timeout},
 	}
-
 }
 
 //preparing request Get
 func (hc *Client) Get(path string, headers http.Header) (*http.Response, error) {
-	var response *http.Response
-	request, errRequest := http.NewRequest(http.MethodGet, fmt.Sprintf("%s%s", hc.config.Host, path), nil)
-	if errRequest != nil {
-		return response, errRequest
-	}
-	request.Header = headers
-
-	return hc.Do(request)
+	return hc.Do(http.MethodGet, path, headers, nil)
 }
 
 //preparing request Post
 func (hc *Client) Post(path string, headers http.Header, body io.Reader) (*http.Response, error) {
-	var response *http.Response
-	request, errRequest := http.NewRequest(http.MethodPost, fmt.Sprintf("%s%s", hc.config.Host, path), body)
-	if errRequest != nil {
-		return response, errRequest
-	}
-	request.Header = headers
-	return hc.Do(request)
+	return hc.Do(http.MethodPost, path, headers, body)
 }
 
 //preparing request Put
 func (hc *Client) Put(path string, headers http.Header, body io.Reader) (*http.Response, error) {
-	var response *http.Response
-	request, errRequest := http.NewRequest(http.MethodPut, fmt.Sprintf("%s%s", hc.config.Host, path), body)
-	if errRequest != nil {
-		return response, errRequest
-	}
-	request.Header = headers
-	return hc.Do(request)
+	return hc.Do(http.MethodPut, path, headers, body)
 }
 
 //preparing request Delete
 func (hc *Client) Delete(path string, headers http.Header) (*http.Response, error) {
-	var response *http.Response
-	request, errRequest := http.NewRequest(http.MethodDelete, generateFullUrl(hc.config.Host, path), nil)
-	if errRequest != nil {
-		return response, errRequest
-	}
-	request.Header = headers
-	return hc.Do(request)
+	return hc.Do(http.MethodDelete, path, headers, nil)
 }
 
 // helper
@@ -153,7 +132,13 @@ func generateFullUrl(url string, path string) string {
 }
 
 // circuit breaker wrapper
-func (hc *Client) Do(request *http.Request) (*http.Response, error) {
+func (hc *Client) Do(httpMethod string, path string, header http.Header, body io.Reader) (*http.Response, error) {
+	//initialize request
+	request, errRequest := http.NewRequest(httpMethod, generateFullUrl(hc.config.Host, path), body)
+	if errRequest != nil {
+		return nil, errRequest
+	}
+
 	if hc.config.IsUsingCircuitBreaker {
 		//execute with circuit breaker
 		var response *http.Response
@@ -180,10 +165,6 @@ func (hc *Client) Do(request *http.Request) (*http.Response, error) {
 
 //actual request execution
 func (hc *Client) doActual(request *http.Request) (*http.Response, error) {
-	if len(hc.config.Host) == 0 {
-		return nil, errors.New("missing host")
-	}
-
 	//execute request
 	response, errResponse := hc.client.Do(request)
 
@@ -191,10 +172,9 @@ func (hc *Client) doActual(request *http.Request) (*http.Response, error) {
 	if errResponse != nil {
 		var responseRetry *http.Response
 		errResponseRetry := errResponse
-
 		//retry mechanism
 		for i := 0; i < hc.config.RetryCount; i++ {
-
+			hc.config.OnPreRetryCallback(request)
 			//re-execute request
 			responseRetry, errResponseRetry = hc.client.Do(request)
 

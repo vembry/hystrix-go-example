@@ -1,3 +1,4 @@
+//go:generate mockery --all --output=./mock --outpkg=mock
 package httpclient
 
 import (
@@ -21,5 +22,5 @@ type HttpClient interface {
 
 	// in-house "native" httpclient
 	// wrapped with circuit breaker, and is active if initialized using it
-	Do(req *http.Request) (*http.Response, error)
+	Do(httpMethod string, path string, header http.Header, body io.Reader) (*http.Response, error)
 }
