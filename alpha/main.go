@@ -125,7 +125,7 @@ func initHandler(r *gin.Engine) {
 		//usage
 		// resp, errResp := client_x.Post("/ping", header, bytes.NewBuffer([]byte(jsonBody)))
 
-		resp, errResp := client_x.Do("Î", "/ping", header, bytes.NewBuffer([]byte(jsonBody)))
+		resp, errResp := client_x.Do(http.MethodGet, "/ping", header, bytes.NewBuffer([]byte(jsonBody)))
 		if errResp != nil {
 			fmt.Printf("service: %s", errResp)
 			fmt.Println()

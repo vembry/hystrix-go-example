@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,18 +11,20 @@ import (
 	"github.com/afex/hystrix-go/hystrix"
 )
 
-//httpclient
+// Client is a wrapper around net/http
+// which have circuit-breaker alike functionality
 type Client struct {
 	client *http.Client // http client, using native golang net's http
 	config Config       // configs
 }
 
-//Circuit Breaker config
+// CircuitBreakerConfig is the circuit breaker's configuration implemented
+// inside the HttpClient wrapper
 type CircuitBreakerConfig struct {
-	SleepWindow    int         // in ms, to wait after a circuit opens before testing for recovery
-	ErrorThreshold int         // minimum number of requests needed before a circuit can be tripped
-	Timeout        int         // in ms, how long to wait for command to complete
-	Fallback       func(error) // custom fallback function
+	SleepWindow    int                                // in ms, to wait after a circuit opens before testing for recovery
+	ErrorThreshold int                                // minimum number of requests needed before a circuit can be tripped
+	Timeout        int                                // in ms, how long to wait for command to complete
+	Fallback       func(context.Context, error) error // custom fallback function
 }
 
 // default values for CircuitBreakerConfig
@@ -31,14 +34,14 @@ const (
 	defaultCbTimeout        = 10000
 )
 
-//httpclient config
+// Config is the HttpClient configuration
 type Config struct {
-	Host                  string               // external host
-	Timeout               time.Duration        // http request timeout
-	RetryCount            int                  // failing http request retry
-	OnPreRetryCallback    func(*http.Request)  // callback called on every pre-retry
-	IsUsingCircuitBreaker bool                 // flag to use circuit breaker, true = on, false = off
-	CbConfig              CircuitBreakerConfig // custom config for circuit breaker
+	Host                  string                    // external host
+	Timeout               time.Duration             // http request timeout
+	RetryCount            int                       // failing http request retry
+	OnPreRetryCallback    func(*http.Request) error // callback called on every pre-retry
+	IsUsingCircuitBreaker bool                      // flag to use circuit breaker, true = on, false = off
+	CbConfig              CircuitBreakerConfig      // custom config for circuit breaker
 }
 
 // default values for Config
@@ -46,9 +49,8 @@ const (
 	defautTimeout = 10 * time.Second
 )
 
-//initialization
+// NewHttpClient initialises the Client handle that is used to wrap net/http
 func NewHttpClient(config Config) HttpClient {
-
 	// force delete '/' at host's value suffix
 	config.Host = strings.TrimSuffix(config.Host, "/")
 
@@ -59,7 +61,10 @@ func NewHttpClient(config Config) HttpClient {
 
 	// set default value if default config not defined
 	if config.OnPreRetryCallback == nil {
-		config.OnPreRetryCallback = func(r *http.Request) {}
+		config.OnPreRetryCallback = func(r *http.Request) error {
+			// deliberately putting empty function so no need if validation on actual execution
+			return nil
+		}
 	}
 
 	// configure circuit breaker
@@ -76,8 +81,9 @@ func NewHttpClient(config Config) HttpClient {
 
 		// set default value if not defined
 		if config.CbConfig.Fallback == nil {
-			config.CbConfig.Fallback = func(error) {
-
+			config.CbConfig.Fallback = func(ctx context.Context, e error) error {
+				// deliberately putting empty function so no need if validation on actual execution
+				return e
 			}
 		}
 
@@ -102,28 +108,27 @@ func NewHttpClient(config Config) HttpClient {
 	}
 }
 
-//preparing request Get
+// Get executes an http request with method GET
 func (hc *Client) Get(path string, headers http.Header) (*http.Response, error) {
 	return hc.Do(http.MethodGet, path, headers, nil)
 }
 
-//preparing request Post
+// Post executes an http request with method POST
 func (hc *Client) Post(path string, headers http.Header, body io.Reader) (*http.Response, error) {
 	return hc.Do(http.MethodPost, path, headers, body)
 }
 
-//preparing request Put
+// Put executes an http request with method PUT
 func (hc *Client) Put(path string, headers http.Header, body io.Reader) (*http.Response, error) {
 	return hc.Do(http.MethodPut, path, headers, body)
 }
 
-//preparing request Delete
+// Delete executes an http request with method DELETE
 func (hc *Client) Delete(path string, headers http.Header) (*http.Response, error) {
 	return hc.Do(http.MethodDelete, path, headers, nil)
 }
 
-// helper
-// to combine url + path
+// generateFullUrl is a helper to combine url + path
 func generateFullUrl(url string, path string) string {
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
@@ -131,67 +136,85 @@ func generateFullUrl(url string, path string) string {
 	return fmt.Sprintf("%s%s", url, path)
 }
 
-// circuit breaker wrapper
+// Do is an in-house "native" httpclient which executes an http request to designated url/host
+// wrapped with circuit breaker functionality and retry mechanism
 func (hc *Client) Do(httpMethod string, path string, header http.Header, body io.Reader) (*http.Response, error) {
-	//initialize request
-	request, errRequest := http.NewRequest(httpMethod, generateFullUrl(hc.config.Host, path), body)
-	if errRequest != nil {
-		return nil, errRequest
-	}
-
-	if hc.config.IsUsingCircuitBreaker {
-		//execute with circuit breaker
-		var response *http.Response
-		err := hystrix.Do(hc.config.Host, func() error {
-			responseHys, err := hc.doActual(request)
-			if err == nil {
-				response = responseHys
-			}
-			return err
-		}, func(e error) error {
-			//circuit breaker fallback
-			if hc.config.CbConfig.Fallback != nil {
-				hc.config.CbConfig.Fallback(e)
-			}
-			return e
-		})
-		return response, err
-	} else {
-		//execute without circuit breaker
-		return hc.doActual(request)
-	}
-
+	return hc.DoContext(context.Background(), httpMethod, path, header, body)
 }
 
-//actual request execution
-func (hc *Client) doActual(request *http.Request) (*http.Response, error) {
-	//execute request
-	response, errResponse := hc.client.Do(request)
+// DoContext is an in-house "native" httpclient which executes an http request to designated url/host
+// wrapped with circuit breaker functionality and retry mechanism
+// with context in args
+func (hc *Client) DoContext(ctx context.Context, httpMethod string, path string, header http.Header, body io.Reader) (*http.Response, error) {
+	// get full url, combination of host and path
+	fullUrl := generateFullUrl(hc.config.Host, path)
 
-	//request validation
-	if errResponse != nil {
-		var responseRetry *http.Response
-		errResponseRetry := errResponse
-		//retry mechanism
+	// initialize request
+	req, errReq := http.NewRequestWithContext(ctx, httpMethod, fullUrl, body)
+	if errReq != nil {
+		return nil, errReq
+	}
+
+	return hc.DoVanilla(req)
+}
+
+// CAUTION: USE THIS AT YOUR OWN RISK
+// DoVanilla is a vanilla version of in-house "native" httpclient which executes an http request to designated url/host
+// wrapped with circuit breaker functionality and retry mechanism
+// with fully customized http.Request param
+func (hc *Client) DoVanilla(req *http.Request) (*http.Response, error) {
+	// execute request
+	res, errRes := hc.doActual(req)
+
+	// request validation
+	if errRes != nil {
+		// retry mechanism
 		for i := 0; i < hc.config.RetryCount; i++ {
-			hc.config.OnPreRetryCallback(request)
-			//re-execute request
-			responseRetry, errResponseRetry = hc.client.Do(request)
+
+			// pre-retry callback
+			errRetryCallback := hc.config.OnPreRetryCallback(req)
+			if errRetryCallback != nil {
+				// failing on pre-retry callback will stop the retry mechanism
+				errRes = errRetryCallback
+				break
+			}
+
+			// exponential wait time for retry
+			time.Sleep(time.Duration(i+1) * time.Second)
+
+			// re-execute request
+			res, errRes = hc.doActual(req)
 
 			//success retry will break the loop
-			if errResponseRetry == nil {
-				response = responseRetry
+			if errRes == nil {
 				break
 			}
 		}
-
-		//request validation
-		if errResponseRetry != nil {
-			//request failed
-			return response, errResponse
-		}
 	}
 
-	//request succeeded
-	return response, nil
+	return res, errRes
+
+}
+
+// doActual is an in-house "native" httpclient which executes an http request to designated url/host
+// wrapped with circuit breaker functionality
+func (hc *Client) doActual(req *http.Request) (*http.Response, error) {
+	// executes without circuit breaker
+	if !hc.config.IsUsingCircuitBreaker {
+		return hc.client.Do(req)
+	}
+
+	// executes with circuit breaker
+	var response *http.Response
+	err := hystrix.DoC(req.Context(), req.URL.String(), func(ctx context.Context) error {
+		var errResponse error
+		response, errResponse = hc.client.Do(req)
+		return errResponse
+	}, func(ctx context.Context, e error) error {
+
+		// im defining a return here for readability
+		return hc.config.CbConfig.Fallback(ctx, e)
+	})
+
+	return response, err
 }

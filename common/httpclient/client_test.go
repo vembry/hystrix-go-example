@@ -1,6 +1,8 @@
 package httpclient
 
 import (
+	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -17,15 +19,20 @@ const (
 // this is just a helper
 func createDummyServer() *httptest.Server {
 	dummyHandler := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{ "response": "ok" }`))
+		_, err := w.Write([]byte(`{ "response": "ok" }`))
+		if err != nil {
+			fmt.Print("something went wrong while initializing dummy server")
+		}
 	}
 	return httptest.NewServer(http.HandlerFunc(dummyHandler))
 }
 
 func Test_HttpClient_Initialization(t *testing.T) {
 	NewHttpClient(Config{
-		Host:                  testHost,
+		Host: testHost,
+		OnPreRetryCallback: func(r *http.Request) error {
+			return nil
+		},
 		IsUsingCircuitBreaker: true,
 	})
 }
@@ -36,6 +43,9 @@ func Test_Get_Success(t *testing.T) {
 
 	client := NewHttpClient(Config{
 		Host: server.URL,
+		OnPreRetryCallback: func(r *http.Request) error {
+			return nil
+		},
 	})
 
 	header := http.Header{}
@@ -117,6 +127,21 @@ func Test_Get_Failed_WithRetry(t *testing.T) {
 
 	_, err := client.Get("", header)
 	require.Error(t, err, "should have failed to make a GET request: missing host")
+}
+
+func Test_Get_Failed_WithRetry_OnPreCallbackFailing(t *testing.T) {
+	client := NewHttpClient(Config{
+		Host:       testHost,
+		RetryCount: 1,
+		OnPreRetryCallback: func(r *http.Request) error {
+			return errors.New("error pre-retry")
+		},
+	})
+	header := http.Header{}
+	header.Set("x-some-header", "some-header-value")
+
+	_, err := client.Get("", header)
+	require.Error(t, err, "should have failed to make a GET request: error pre-retry")
 }
 
 func Test_Post_Success(t *testing.T) {
