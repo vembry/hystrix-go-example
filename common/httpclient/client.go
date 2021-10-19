@@ -1,7 +1,9 @@
 package httpclient
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -108,52 +110,136 @@ func NewHttpClient(config Config) HttpClient {
 	}
 }
 
+type Parameter struct {
+	Path          string
+	PathVariables []string
+	QueryParams   map[string]string
+	Header        map[string]string
+	Body          interface{}
+}
+
+func addQueryString(req *http.Request, queryStrings map[string]string) {
+	q := req.URL.Query()
+	for key, value := range queryStrings {
+		q.Add(key, value)
+	}
+	req.URL.RawQuery = q.Encode()
+}
+
+// generateBody is a helper to convert header map to http.Header
+func generateHeaders(headersPlain map[string]string) http.Header {
+	headers := http.Header{}
+	for key, value := range headersPlain {
+		headers.Set(key, value)
+	}
+	return headers
+}
+
+// generateBody is a helper to convert body object to io.Reader
+func generateBody(bodyPlain interface{}) (io.Reader, error) {
+	jsonBody, err := json.Marshal(bodyPlain)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewBuffer([]byte(jsonBody)), nil
+}
+
+// generateUrl is a helper to combine url + path + path-variables
+func (hc *Client) generateUrl(param Parameter) string {
+	fullPath := hc.config.Host
+	if len(param.Path) > 0 && !strings.HasPrefix(param.Path, "/") {
+		fullPath = fullPath + "/"
+	}
+	fullPath = fullPath + param.Path
+
+	if len(param.PathVariables) > 0 {
+		fullPath = fmt.Sprintf("%s/%s", fullPath, strings.Join(param.PathVariables, "/"))
+	}
+
+	return fullPath
+}
+
 // Get executes an http request with method GET
-func (hc *Client) Get(path string, headers http.Header) (*http.Response, error) {
-	return hc.Do(http.MethodGet, path, headers, nil)
+// wrapped with circuit breaker functionality and retry mechanism
+func (hc *Client) Get(param Parameter) (*http.Response, error) {
+	return hc.Do(http.MethodGet, param)
+}
+
+// Get executes an http request with method GET
+// wrapped with circuit breaker functionality and retry mechanism
+// with context in args
+func (hc *Client) GetWithContext(ctx context.Context, param Parameter) (*http.Response, error) {
+	return hc.DoContext(ctx, http.MethodGet, param)
 }
 
 // Post executes an http request with method POST
-func (hc *Client) Post(path string, headers http.Header, body io.Reader) (*http.Response, error) {
-	return hc.Do(http.MethodPost, path, headers, body)
+// wrapped with circuit breaker functionality and retry mechanism
+func (hc *Client) Post(param Parameter) (*http.Response, error) {
+	return hc.Do(http.MethodPost, param)
+}
+
+// Post executes an http request with method POST
+// wrapped with circuit breaker functionality and retry mechanism
+// with context in args
+func (hc *Client) PostWithContext(ctx context.Context, param Parameter) (*http.Response, error) {
+	return hc.DoContext(ctx, http.MethodPost, param)
 }
 
 // Put executes an http request with method PUT
-func (hc *Client) Put(path string, headers http.Header, body io.Reader) (*http.Response, error) {
-	return hc.Do(http.MethodPut, path, headers, body)
+// wrapped with circuit breaker functionality and retry mechanism
+func (hc *Client) Put(param Parameter) (*http.Response, error) {
+	return hc.Do(http.MethodPut, param)
+}
+
+// Put executes an http request with method PUT
+// wrapped with circuit breaker functionality and retry mechanism
+// with context in args
+func (hc *Client) PutWithContext(ctx context.Context, param Parameter) (*http.Response, error) {
+	return hc.DoContext(ctx, http.MethodPut, param)
 }
 
 // Delete executes an http request with method DELETE
-func (hc *Client) Delete(path string, headers http.Header) (*http.Response, error) {
-	return hc.Do(http.MethodDelete, path, headers, nil)
+// wrapped with circuit breaker functionality and retry mechanism
+func (hc *Client) Delete(param Parameter) (*http.Response, error) {
+	return hc.Do(http.MethodDelete, param)
 }
 
-// generateFullUrl is a helper to combine url + path
-func generateFullUrl(url string, path string) string {
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	return fmt.Sprintf("%s%s", url, path)
+// Delete executes an http request with method DELETE
+// wrapped with circuit breaker functionality and retry mechanism
+// with context in args
+func (hc *Client) DeleteWithContext(ctx context.Context, param Parameter) (*http.Response, error) {
+	return hc.DoContext(ctx, http.MethodDelete, param)
 }
 
 // Do is an in-house "native" httpclient which executes an http request to designated url/host
 // wrapped with circuit breaker functionality and retry mechanism
-func (hc *Client) Do(httpMethod string, path string, header http.Header, body io.Reader) (*http.Response, error) {
-	return hc.DoContext(context.Background(), httpMethod, path, header, body)
+func (hc *Client) Do(httpMethod string, param Parameter) (*http.Response, error) {
+	return hc.DoContext(context.Background(), httpMethod, param)
 }
 
 // DoContext is an in-house "native" httpclient which executes an http request to designated url/host
 // wrapped with circuit breaker functionality and retry mechanism
 // with context in args
-func (hc *Client) DoContext(ctx context.Context, httpMethod string, path string, header http.Header, body io.Reader) (*http.Response, error) {
-	// get full url, combination of host and path
-	fullUrl := generateFullUrl(hc.config.Host, path)
+func (hc *Client) DoContext(ctx context.Context, httpMethod string, param Parameter) (*http.Response, error) {
+
+	fullUrl := hc.generateUrl(param)
+	headers := generateHeaders(param.Header)
+	body, err := generateBody(param.Body)
+	if err != nil {
+		return nil, err
+	}
 
 	// initialize request
 	req, errReq := http.NewRequestWithContext(ctx, httpMethod, fullUrl, body)
 	if errReq != nil {
 		return nil, errReq
 	}
+
+	// add query string
+	addQueryString(req, param.QueryParams)
+
+	// add headers
+	req.Header = headers
 
 	return hc.DoVanilla(req)
 }

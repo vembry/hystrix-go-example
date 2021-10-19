@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -101,31 +101,32 @@ func initHandler(r *gin.Engine) {
 			CbConfig: httpclient_x.CircuitBreakerConfig{
 				SleepWindow:    10000,
 				ErrorThreshold: 10,
-				Fallback: func(e error) {
+				Fallback: func(c context.Context, e error) error {
 					somerandom("hi!")
+					return e
 				},
 			},
 		})
 
-		// request initialization
-		// header
-		header := http.Header{}
-		header.Set("x-some-header", "some-header-value")
-		header.Set("Content-Type", "application/json")
-
-		// body
-		body := map[string]interface{}{
-			"someKeyValue1": map[string]string{
-				"someInnerKeyValue1": "some-inner-value-1",
-			},
-			"someKeyValue2": "some-value-2",
-		}
-		jsonBody, _ := json.Marshal(body)
-
 		//usage
 		// resp, errResp := client_x.Post("/ping", header, bytes.NewBuffer([]byte(jsonBody)))
-
-		resp, errResp := client_x.Do(http.MethodGet, "/ping", header, bytes.NewBuffer([]byte(jsonBody)))
+		resp, errResp := client_x.Do(http.MethodPost, httpclient_x.Parameter{
+			Path:          "/ping",
+			PathVariables: []string{"path-variable-1"},
+			QueryParams: map[string]string{
+				"some-query-string":   "some-query-string-value",
+				"some-query-string-1": "some-query-string-value-1",
+			},
+			Header: map[string]string{
+				"some-header": "some-header-value",
+			},
+			Body: map[string]interface{}{
+				"someKeyValue1": map[string]string{
+					"someInnerKeyValue1": "some-inner-value-1",
+				},
+				"someKeyValue2": "some-value-2",
+			},
+		})
 		if errResp != nil {
 			fmt.Printf("service: %s", errResp)
 			fmt.Println()

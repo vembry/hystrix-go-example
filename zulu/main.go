@@ -17,7 +17,7 @@ func main() {
 		})
 	})
 
-	r.POST("/ping", func(c *gin.Context) {
+	r.POST("/ping/:pathVariable", func(c *gin.Context) {
 		type Body struct {
 			SomeKeyValue1 map[string]string `json:"someKeyValue1"`
 			SomeKeyValue2 string            `json:"someKeyValue2"`
