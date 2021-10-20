@@ -110,6 +110,7 @@ func NewHttpClient(config Config) HttpClient {
 	}
 }
 
+// Parameter is a struct consists of the HttpClient basic payload
 type Parameter struct {
 	Path          string
 	PathVariables []string
@@ -118,6 +119,7 @@ type Parameter struct {
 	Body          interface{}
 }
 
+// addQueryString is a helper to add query string to the request
 func addQueryString(req *http.Request, queryStrings map[string]string) {
 	q := req.URL.Query()
 	for key, value := range queryStrings {
@@ -141,7 +143,7 @@ func generateBody(bodyPlain interface{}) (io.Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	return bytes.NewBuffer([]byte(jsonBody)), nil
+	return bytes.NewBuffer(jsonBody), nil
 }
 
 // generateUrl is a helper to combine url + path + path-variables
@@ -235,7 +237,7 @@ func (hc *Client) DoContext(ctx context.Context, httpMethod string, param Parame
 		return nil, errReq
 	}
 
-	// add query string
+	// add query strings
 	addQueryString(req, param.QueryParams)
 
 	// add headers
